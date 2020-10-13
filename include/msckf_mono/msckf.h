@@ -153,6 +153,7 @@ public:
     imu_cam_covar_ = Phi_ * imu_cam_covar_;
   }
 
+  // 与论文中III-C一致
   // Generates a new camera state and adds it to the full state and covariance.
   void augmentState(const int &state_id, const _S &time)
   {
@@ -234,6 +235,8 @@ public:
     tracks_to_remove_.clear();
 
     int id_iter = 0;
+    // feature_ids指代当前特征点索引集
+    // tracked_feature_ids_指代已跟踪的特征的索引集
     // Loop through all features being tracked
     for (auto feature_id : tracked_feature_ids_)
     {
@@ -245,21 +248,24 @@ public:
       // If so, get the relevant track
       auto track = feature_tracks_.begin() + id_iter;
 
+      // 如果跟踪的特征点出现在当前图像中，则将当前观测信息记录到对应特征的分组中
       // If we're still tracking this point, add the observation
       if (is_valid)
       {
+        // 根据特征点对观测数据进行分组
         size_t feature_ids_dist =
             distance(feature_ids.begin(), input_feature_ids_iter);
         track->observations.push_back(measurements[feature_ids_dist]);
 
+        // 更新相机状态量中的特征点集
         auto cam_state_iter = cam_states_.end() - 1;
         cam_state_iter->tracked_feature_ids.push_back(feature_id);
 
+        // 记录特征点分组中相机状态索引
         track->cam_state_indices.push_back(cam_state_iter->state_id);
       }
 
-      // If corner is not valid or track is too long, remove track to be
-      // residualized
+      // If corner is not valid or track is too long, remove track to be residualized
       if (!is_valid || (track->observations.size() >=
                         msckf_params_.max_track_length))
       {
