@@ -783,6 +783,7 @@ public:
   }
 
   // Removes camera states that no longer contain any active observations.
+  // 删除不包含任何激活特征点的相机状态，并更新对应的协方差矩阵
   void pruneEmptyStates()
   {
     int max_states = msckf_params_.max_cam_states;
@@ -815,6 +816,7 @@ public:
       }
     }
 
+    //删除无效相机状态
     for (int i = 0; i <= last_to_remove; ++i)
     {
       deleteIdx.push_back(camstate_pos + num_deleted);
@@ -839,6 +841,7 @@ public:
         }
       }
 
+      //更新对应的协方差
       int remove_counter = 0;
       int keep_counter = 0;
       VectorXi keepCovarIdx(6 * n_keep);
