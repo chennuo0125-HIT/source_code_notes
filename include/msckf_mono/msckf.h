@@ -1281,6 +1281,13 @@ private:
     }
   }
 
+  // 原理:
+  // c1_vec_z1 = (z1(0), z1(1), 1.0) 特征点1归一化向量
+  // c2_vec_z2 = (z2(0), z2(1), 1.0) 特征点2归一化向量
+  // 设特征点在c1坐标系下深度为d，则特征点坐标为c1_vec_p = d*c1_vec_z1
+  // 将特征点转换到c2坐标系下，c2_vec_p = T_c1_c2.linear()*c1_vec_p + T_c1_c2.translation()
+  // 又因为c2坐标系下原点到特征点的向量平行与z2，所以有c2_vec_p = k*c2_vec_z2
+  // 然后消元即可获得如下代码计算公式
   void generateInitialGuess(const Isometry3<_S> &T_c1_c2, const Vector2<_S> &z1,
                             const Vector2<_S> &z2, Vector3<_S> &p) const
   {
