@@ -49,7 +49,7 @@ private:
   std::vector<camState<_S>> cam_states_;
 
   std::vector<camState<_S>> pruned_states_;
-  std::vector<Vector3<_S>, Eigen::aligned_allocator<Vector3<_S>>> map_;
+  std::vector<Vector3<_S>, Eigen::aligned_allocator<Vector3<_S>>> map_; //记录特征点位置
 
   Matrix<_S, 15, 15> imu_covar_;
   MatrixX<_S> cam_covar_;
@@ -265,14 +265,18 @@ public:
         track->cam_state_indices.push_back(cam_state_iter->state_id);
       }
 
+      // 如果特征点未出现在当前图像帧中，或者特征点被跟踪的次数超过给定阈值，则移除特征点
       // If corner is not valid or track is too long, remove track to be residualized
       if (!is_valid || (track->observations.size() >=
                         msckf_params_.max_track_length))
       {
+        // 移除观测到"移除特征点"的相机状态中的"移除特征点"，并记录对应的相机状态
         featureTrackToResidualize<_S> track_to_residualize;
         removeTrackedFeature(feature_id, track_to_residualize.cam_states,
                              track_to_residualize.cam_state_indices);
 
+        // 如果"移除特征点"被跟踪的次数超过设定的阈值，则将track的相关信息记录到 track_to_residualize 中
+        // feature_tracks_to_residualize_中记录了被丢弃的特征点信息
         // If track is long enough, add to the residualized list
         if (track_to_residualize.cam_states.size() >=
             msckf_params_.min_track_length)
@@ -286,6 +290,7 @@ public:
           feature_tracks_to_residualize_.push_back(track_to_residualize);
         }
 
+        // 记录要移除的特征点索引
         tracks_to_remove_.push_back(feature_id);
       }
 
@@ -294,7 +299,7 @@ public:
 
     // TODO: Double check this stuff and maybe use use non-pointers for accessing
     // elements so that it only requires one pass
-
+    // 移除 tracks_to_remove_ 中的特征点
     for (auto feature_id : tracks_to_remove_)
     {
       auto track_iter = feature_tracks_.begin();
@@ -373,6 +378,7 @@ public:
   // to update the camera states that observed them.
   void marginalize()
   {
+    // 如果被丢弃的特征点数量不为0
     if (!feature_tracks_to_residualize_.empty())
     {
       int num_passed, num_rejected, num_ransac, max_length, min_length;
@@ -392,6 +398,7 @@ public:
       for (auto track = feature_tracks_to_residualize_.begin();
            track != feature_tracks_to_residualize_.end(); track++)
       {
+        // 如果被丢弃的有效特征点数量超过3个时，需要检查丢弃特征点内的相机状态是否移动了足够距离
         if (num_feature_tracks_residualized_ > 3 &&
             !checkMotion(track->observations.front(), track->cam_states))
         {
@@ -403,6 +410,7 @@ public:
         Vector3<_S> p_f_G;
         _S Jcost, RCOND;
 
+        // 估计特征点位置
         // Estimate feature 3D location with intersection, LM
         bool isvalid =
             initializePosition(track->cam_states, track->observations, p_f_G);
@@ -411,12 +419,13 @@ public:
         {
           track->initialized = true;
           track->p_f_G = p_f_G;
-          map_.push_back(p_f_G);
+          map_.push_back(p_f_G); //map_记录特征点位置
         }
 
-        p_f_G_vec.push_back(p_f_G);
+        p_f_G_vec.push_back(p_f_G); //记录新还原出来的特征点位置
         int nObs = track->observations.size();
 
+        // 转换特征点位置到c1坐标系
         Vector3<_S> p_f_C1 = (track->cam_states[0].q_CG.toRotationMatrix()) *
                              (p_f_G - track->cam_states[0].p_C_G);
 
@@ -467,18 +476,18 @@ public:
         featureTrackToResidualize<_S> track = feature_tracks_to_residualize_[iter];
 
         Vector3<_S> p_f_G = p_f_G_vec[iter];
-        VectorX<_S> r_j = calcResidual(p_f_G, track.cam_states, track.observations);
+        VectorX<_S> r_j = calcResidual(p_f_G, track.cam_states, track.observations); //计算视觉测量残差，与论文中公式18,19,20一致
 
         int nObs = track.observations.size();
         MatrixX<_S> R_j = (rep.replicate(nObs, 1)).asDiagonal();
 
         // Calculate H_o_j and residual
         MatrixX<_S> H_o_j, A_j;
-        calcMeasJacobian(p_f_G, track.cam_state_indices, H_o_j, A_j);
+        calcMeasJacobian(p_f_G, track.cam_state_indices, H_o_j, A_j); //计算论文公式(23)中的A_T和H_0
 
         // Stacked residuals and friends
-        VectorX<_S> r_o_j = A_j.transpose() * r_j;
-        MatrixX<_S> R_o_j = A_j.transpose() * R_j * A_j;
+        VectorX<_S> r_o_j = A_j.transpose() * r_j;       //将论文公式(22)中的r_j投影到左零空间
+        MatrixX<_S> R_o_j = A_j.transpose() * R_j * A_j; //将测量噪声投影到左零空间
 
         if (gatingTest(H_o_j, r_o_j, track.cam_states.size() - 1))
         {
@@ -495,6 +504,8 @@ public:
       r_o.conservativeResize(stack_counter);
       R_o.conservativeResize(stack_counter, stack_counter);
 
+      // 至此计算出论文中的观测方程中的H_0, r_0, 已经n_0对应的噪声方差矩阵
+      // 然后根据ekf的观测更新过程更新状态和协方差
       measurementUpdate(H_o, r_o, R_o);
     }
   }
@@ -1019,6 +1030,7 @@ private:
     G_.template block<3, 3>(9, 9) = Matrix3<_S>::Identity();
   }
 
+  // 计算论文公式(23)中的A_T和H_0
   void calcMeasJacobian(const Vector3<_S> &p_f_G,
                         const std::vector<size_t> &camStateIndices,
                         MatrixX<_S> &H_o_j,
@@ -1070,12 +1082,14 @@ private:
 
     int jacobian_row_size = 2 * camStateIndices.size();
 
+    // 计算H_f_j的左零空间A_j
     JacobiSVD<MatrixX<_S>> svd_helper(H_f_j, ComputeFullU | ComputeThinV);
     A_j = svd_helper.matrixU().rightCols(jacobian_row_size - 3);
 
-    H_o_j = A_j.transpose() * H_x_j;
+    H_o_j = A_j.transpose() * H_x_j; //将H_x_j投影到左零空间
   }
 
+  // 对应论文中的公式(20)，计算观测残差
   VectorX<_S> calcResidual(const Vector3<_S> &p_f_G,
                            const std::vector<camState<_S>> &camStates,
                            const std::vector<Vector2<_S>, Eigen::aligned_allocator<Vector2<_S>>> &observations)
@@ -1098,6 +1112,7 @@ private:
     return r_j;
   }
 
+  //　检查特征点分组内存储的相机状态集合是否有足够移动
   bool checkMotion(const Vector2<_S> first_observation,
                    const std::vector<camState<_S>> &cam_states)
   {
@@ -1307,6 +1322,7 @@ private:
     // All camera poses should be modified such that it takes a
     // std::vector from the first camera frame in the buffer to this
     // camera frame.
+    // 将所有状态转换到c0坐标系下
     Isometry3<_S> T_c0_w = cam_poses[0];
     for (auto &pose : cam_poses)
       pose = pose.inverse() * T_c0_w;
@@ -1512,6 +1528,7 @@ private:
       T_H = MatrixX<_S>::Zero(numNonZeroRows, R.cols());
       Q_1 = MatrixX<_S>::Zero(Q.rows(), numNonZeroRows);
 
+      // 计算论文公式28中的T_H, Q_1
       size_t counter = 0;
       for (size_t r_ind = 0; r_ind < R.rows(); r_ind++)
       {
@@ -1530,6 +1547,7 @@ private:
       r_n = Q_1.transpose() * r_o;
       R_n = Q_1.transpose() * R_o * Q_1;
 
+      // 后面对应论文中的公式28,29,30,31更新误差状态和协方差
       // Calculate Kalman Gain
       MatrixX<_S> temp = T_H * P * T_H.transpose() + R_n;
       MatrixX<_S> K = (P * T_H.transpose()) * temp.inverse();

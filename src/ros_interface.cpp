@@ -124,11 +124,11 @@ void RosInterface::imageCallback(const sensor_msgs::ImageConstPtr &msg)
 
   // 状态向量的增广, 对应论文中III-C部分
   msckf_.augmentState(state_k_, (float)cur_image_time);
-  // 测量更新，对应论文中III-D,III-E部分
+  // 更新跟踪特征点信息，并确定需要移除的特征点
   msckf_.update(cur_features, cur_ids);
   // 添加新特征点
   msckf_.addFeatures(new_features, new_ids);
-  // 边缘化
+  // 边缘化: 测量更新，对应论文中III-D,III-E部分
   msckf_.marginalize();
   // msckf_.pruneRedundantStates();
   msckf_.pruneEmptyStates();
@@ -337,12 +337,12 @@ void RosInterface::load_parameters()
 
   nh_.param<float>("max_gn_cost_norm", msckf_params_.max_gn_cost_norm, 11);
   msckf_params_.max_gn_cost_norm = pow(msckf_params_.max_gn_cost_norm / camera_.f_u, 2);
-  nh_.param<float>("translation_threshold", msckf_params_.translation_threshold, 0.05);
+  nh_.param<float>("translation_threshold", msckf_params_.translation_threshold, 0.05); //移动阈值(如果跟踪特征点内的状态集合之间的最大距离超过该阈值则被认为是有效跟踪点)
   nh_.param<float>("min_rcond", msckf_params_.min_rcond, 3e-12);
   nh_.param<float>("keyframe_transl_dist", msckf_params_.redundancy_angle_thresh, 0.005);
   nh_.param<float>("keyframe_rot_dist", msckf_params_.redundancy_distance_thresh, 0.05);
-  nh_.param<int>("max_track_length", msckf_params_.max_track_length, 1000);
-  nh_.param<int>("min_track_length", msckf_params_.min_track_length, 3);
+  nh_.param<int>("max_track_length", msckf_params_.max_track_length, 1000); //特征点被跟踪的最大次数(超过该次数将会被移除，并进行三角化)
+  nh_.param<int>("min_track_length", msckf_params_.min_track_length, 3);    //特征点被跟踪的最小次数
   nh_.param<int>("max_cam_states", msckf_params_.max_cam_states, 20);
 
   // Load calibration time
