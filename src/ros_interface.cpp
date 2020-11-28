@@ -192,6 +192,7 @@ void RosInterface::initialize_imu()
   accel_accum.setZero();
   gyro_accum.setZero();
 
+  // 累加初始一段时间内imu的测量值
   for (const auto &entry : imu_queue_)
   {
     auto imu_time = std::get<0>(entry);

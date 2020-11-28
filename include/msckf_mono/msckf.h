@@ -159,6 +159,7 @@ public:
   {
     map_.clear();
 
+    // 依据当前IMU位姿计算出当前相机位姿(论文中公式14)
     // Compute camera_ pose from current IMU pose
     Quaternion<_S> q_CG = camera_.q_CI * imu_state_.q_IG;
 
@@ -173,6 +174,7 @@ public:
     cam_state.time = time;
     cam_state.state_id = state_id;
 
+    // 协方差维度增广
     // Build MSCKF covariance matrix
     if (cam_states_.size())
     {
@@ -192,6 +194,7 @@ public:
       //ROS_ERROR("Covariance determinant is negative! %f", P.determinant());
     }
 
+    // 计算新相机状态相对于状态向量的jacobi矩阵(论文中公式16)
     MatrixX<_S> J = MatrixX<_S>::Zero(6, 15 + 6 * cam_states_.size());
     J.template block<3, 3>(0, 0) = camera_.q_CI.toRotationMatrix();
     J.template block<3, 3>(3, 0) =
@@ -206,6 +209,7 @@ public:
     tempMat.block(15 + 6 * cam_states_.size(), 0, 6,
                   15 + 6 * cam_states_.size()) = J;
 
+    // 增广协方差矩阵
     // Augment the MSCKF covariance matrix
     MatrixX<_S> P_aug = tempMat * P_ * tempMat.transpose();
 
@@ -213,6 +217,7 @@ public:
 
     P_aug = P_aug_sym;
 
+    // 增广状态向量
     // Break everything into appropriate structs
     cam_states_.push_back(cam_state);
     imu_covar_ = P_aug.template block<15, 15>(0, 0);
