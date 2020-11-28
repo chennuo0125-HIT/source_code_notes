@@ -106,14 +106,14 @@ public:
   // using the acceleration and angular velocity in measurement.
   void propagate(imuReading<_S> &measurement_)
   {
-    //按论文中的公式(10)计算F矩阵和G矩阵(个人理解此处imu_state_应该用当前时刻的名义状态，而不是用上一时刻的状态)
+    //按论文中的公式(10)计算F矩阵和G矩阵
     calcF(imu_state_, measurement_);
     calcG(imu_state_);
 
-    // 传播imu状态到k+1时刻
+    // 预测k+1时刻imu状态
     imuState<_S> imu_state_prop = propogateImuStateRK(imu_state_, measurement_);
 
-    // 更新协方差
+    // 预测协方差
     // F * dt
     F_ *= measurement_.dT;
 
@@ -458,6 +458,7 @@ public:
       {
         return;
       }
+      //　初始化投影到零空间后的观测方程中的变量
       MatrixX<_S> H_o = MatrixX<_S>::Zero(2 * total_nObs - 3 * num_passed,
                                           15 + 6 * cam_states_.size());
       MatrixX<_S> R_o = MatrixX<_S>::Zero(2 * total_nObs - 3 * num_passed,
@@ -504,7 +505,7 @@ public:
       r_o.conservativeResize(stack_counter);
       R_o.conservativeResize(stack_counter, stack_counter);
 
-      // 至此计算出论文中的观测方程中的H_0, r_0, 已经n_0对应的噪声方差矩阵
+      // 至此计算出论文中的观测方程中的H_0, r_0, 以及n_0对应的噪声方差矩阵
       // 然后根据ekf的观测更新过程更新状态和协方差
       measurementUpdate(H_o, r_o, R_o);
     }
@@ -520,6 +521,7 @@ public:
       return;
     }
 
+    // 查找多余关键帧
     // Find two camera states to rmoved
     std::vector<size_t> rm_cam_state_ids;
     rm_cam_state_ids.clear();
@@ -531,6 +533,7 @@ public:
     {
       std::vector<size_t> involved_cam_state_ids;
       size_t obs_id;
+      // 在跟踪的特征点中，查找并记录出现的多余帧id
       // Check how many camera states to be removed are associated with a given
       // feature
       for (const auto &cam_id : rm_cam_state_ids)
@@ -544,6 +547,7 @@ public:
         }
       }
 
+      // 当当前特征点在多余帧中出现的次数较少，则不做处理
       if (involved_cam_state_ids.size() == 0)
         continue;
       if (involved_cam_state_ids.size() == 1)
@@ -554,6 +558,7 @@ public:
         continue;
       }
 
+      // 若当前特征未进行初始化，则需要对其进行初始化，恢复其位置信息
       if (!feature.initialized)
       {
         std::vector<camState<_S>> feature_associated_cam_states;
@@ -794,6 +799,7 @@ public:
 
     size_t num_states = cam_states_.size();
 
+    // 找到所有的不带有特征点信息的相机状态，并删除它们
     // Find all cam_states_ with no tracked landmarks and prune them
     auto camState_it = cam_states_.begin();
     size_t num_deleted = 0;
@@ -841,7 +847,7 @@ public:
         }
       }
 
-      //更新对应的协方差
+      //更新对应的协方差(直接移除状态位对应的协方差位)
       int remove_counter = 0;
       int keep_counter = 0;
       VectorXi keepCovarIdx(6 * n_keep);
@@ -1007,6 +1013,7 @@ private:
            error state model */
     F_.setZero();
 
+    // 计算角速度和加速度名义状态
     Vector3<_S> omegaHat, aHat;
     omegaHat = measurement_k.omega - imu_state_k.b_g;
     aHat = measurement_k.a - imu_state_k.b_a; //论文中有考虑地球自转影响，这里没考虑
@@ -1190,6 +1197,9 @@ private:
     return;
   }
 
+  // 查找多余关键帧
+  // 1.相邻两帧之间的位置和角度距离阈值小于给定的阈值，则为多余帧
+  // 2.当关键帧数量超过设定的最大照相机状态数量，则将超过部分的旧的关键帧置为多余帧
   void findRedundantCamStates(std::vector<size_t> &rm_cam_state_ids)
   {
     // Ensure that there are enough cam_states to work with
@@ -1215,6 +1225,7 @@ private:
       const auto &cam_q = next_cs->q_CG;
       _S distance = (cam_pos - kf_pos).norm();
       _S angle = kf_q.angularDistance(cam_q);
+      // 当相邻两关键帧之间的位置距离阈值和角度距离阈值小于给定值时，则将该帧置为多余帧
       if (distance < dist_thresh && angle < angle_thresh)
       {
         rm_cam_state_ids.push_back(next_cs->state_id);
@@ -1233,6 +1244,7 @@ private:
       }
     }
 
+    // 当剩余的关键帧数量超过msckf给定的最大相机状态数量，则直接将超过的那部分旧的关键帧置为多余帧
     int num_over_max = (cam_states_.size() - rm_cam_state_ids.size()) - msckf_params_.max_cam_states;
     for (int i = 0; i < num_over_max; i++)
     {

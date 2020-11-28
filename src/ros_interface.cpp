@@ -223,6 +223,7 @@ void RosInterface::initialize_imu()
                   << "\n--p_I_G " << init_imu_state_.p_I_G.transpose() << "\n--q_IG " << q.w() << "," << q.x() << "," << q.y() << "," << q.x() << "\n--v_I_G " << init_imu_state_.v_I_G.transpose() << "\n--b_a " << init_imu_state_.b_a.transpose() << "\n--b_g " << init_imu_state_.b_g.transpose() << "\n--g " << init_imu_state_.g.transpose());
 }
 
+// 初始化跟踪器
 void RosInterface::setup_track_handler()
 {
   track_handler_.reset(new corner_detector::TrackHandler(K_, dist_coeffs_, distortion_model_));
@@ -230,10 +231,11 @@ void RosInterface::setup_track_handler()
   track_handler_->set_ransac_threshold(ransac_threshold_);
 }
 
+// 初始化msckf对象
 void RosInterface::setup_msckf()
 {
   state_k_ = 0;
-  msckf_.initialize(camera_, noise_params_, msckf_params_, init_imu_state_);
+  msckf_.initialize(camera_, noise_params_, msckf_params_, init_imu_state_); //初始化msckf对象需要相机模型，噪声参数，msckf内部参数，初始imu状态
 }
 
 void RosInterface::load_parameters()
@@ -261,6 +263,7 @@ void RosInterface::load_parameters()
   dist_coeffs_.at<float>(2) = distortion_coeffs[2];
   dist_coeffs_.at<float>(3) = distortion_coeffs[3];
 
+  // 获取imu与相机外参
   XmlRpc::XmlRpcValue ros_param_list;
   nh_.getParam(kalibr_camera + "/T_cam_imu", ros_param_list);
   ROS_ASSERT(ros_param_list.getType() == XmlRpc::XmlRpcValue::TypeArray);
@@ -282,6 +285,7 @@ void RosInterface::load_parameters()
   R_imu_cam_ = R_cam_imu_.transpose();
   p_imu_cam_ = R_imu_cam_ * (-1. * p_cam_imu_);
 
+  //　设置相机对象
   // setup camera parameters
   camera_.f_u = intrinsics[0];
   camera_.f_v = intrinsics[1];
@@ -299,22 +303,23 @@ void RosInterface::load_parameters()
   nh_.param<float>("ransac_threshold_", ransac_threshold_, 0.000002);
 
   // MSCKF Parameters
+  // 获取特征协方差
   float feature_cov;
   nh_.param<float>("feature_covariance", feature_cov, 7);
 
   // imu方差Q_imu对角线元素
   Eigen::Matrix<float, 12, 1> Q_imu_vars;
   float w_var, dbg_var, a_var, dba_var;
-  nh_.param<float>("imu_vars/w_var", w_var, 1e-5);
-  nh_.param<float>("imu_vars/dbg_var", dbg_var, 3.6733e-5);
-  nh_.param<float>("imu_vars/a_var", a_var, 1e-3);
-  nh_.param<float>("imu_vars/dba_var", dba_var, 7e-4);
+  nh_.param<float>("imu_vars/w_var", w_var, 1e-5);          //角速度方差
+  nh_.param<float>("imu_vars/dbg_var", dbg_var, 3.6733e-5); //陀螺仪偏置随机游走方差
+  nh_.param<float>("imu_vars/a_var", a_var, 1e-3);          //加速度方差
+  nh_.param<float>("imu_vars/dba_var", dba_var, 7e-4);      //加速度计偏置随机游走方差
   Q_imu_vars << w_var, w_var, w_var,
       dbg_var, dbg_var, dbg_var,
       a_var, a_var, a_var,
       dba_var, dba_var, dba_var;
 
-  // imu初始状态(q, bg, v, ba, p)的协方差P_II_0|0对角线元素
+  // 初始imu状态(q, bg, v, ba, p)的协方差P_II_0|0对角线元素
   Eigen::Matrix<float, 15, 1> IMUCovar_vars;
   float q_var_init, bg_var_init, v_var_init, ba_var_init, p_var_init;
   nh_.param<float>("imu_covars/q_var_init", q_var_init, 1e-5);
@@ -329,7 +334,7 @@ void RosInterface::load_parameters()
       p_var_init, p_var_init, p_var_init;
 
   // Setup noise parameters
-  // 设置imu方差Q_imu, 初始状态协方差P_II_0|0
+  // 设置imu方差Q_imu, 初始状态协方差P_II_0|0, 特征方差
   noise_params_.initial_imu_covar = IMUCovar_vars.asDiagonal();
   noise_params_.Q_imu = Q_imu_vars.asDiagonal();
   noise_params_.u_var_prime = pow(feature_cov / camera_.f_u, 2);
@@ -339,11 +344,11 @@ void RosInterface::load_parameters()
   msckf_params_.max_gn_cost_norm = pow(msckf_params_.max_gn_cost_norm / camera_.f_u, 2);
   nh_.param<float>("translation_threshold", msckf_params_.translation_threshold, 0.05); //移动阈值(如果跟踪特征点内的状态集合之间的最大距离超过该阈值则被认为是有效跟踪点)
   nh_.param<float>("min_rcond", msckf_params_.min_rcond, 3e-12);
-  nh_.param<float>("keyframe_transl_dist", msckf_params_.redundancy_angle_thresh, 0.005);
-  nh_.param<float>("keyframe_rot_dist", msckf_params_.redundancy_distance_thresh, 0.05);
-  nh_.param<int>("max_track_length", msckf_params_.max_track_length, 1000); //特征点被跟踪的最大次数(超过该次数将会被移除，并进行三角化)
-  nh_.param<int>("min_track_length", msckf_params_.min_track_length, 3);    //特征点被跟踪的最小次数
-  nh_.param<int>("max_cam_states", msckf_params_.max_cam_states, 20);
+  nh_.param<float>("keyframe_transl_dist", msckf_params_.redundancy_angle_thresh, 0.005); //关键帧移动距离的最小值
+  nh_.param<float>("keyframe_rot_dist", msckf_params_.redundancy_distance_thresh, 0.05);  //关键帧旋转角度的最小值
+  nh_.param<int>("max_track_length", msckf_params_.max_track_length, 1000);               //特征点被跟踪的最大次数(超过该次数将会被移除，并进行三角化)
+  nh_.param<int>("min_track_length", msckf_params_.min_track_length, 3);                  //特征点被跟踪的最小次数
+  nh_.param<int>("max_cam_states", msckf_params_.max_cam_states, 20);                     //最大相机状态数量
 
   // Load calibration time
   int method;

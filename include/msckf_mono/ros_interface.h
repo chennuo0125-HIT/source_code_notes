@@ -54,13 +54,13 @@ private:
   Matrix3<float> R_imu_cam_;
   Vector3<float> p_imu_cam_;
 
-  Matrix3<float> R_cam_imu_;
-  Vector3<float> p_cam_imu_;
+  Matrix3<float> R_cam_imu_; //相机与imu之间的旋转外参
+  Vector3<float> p_cam_imu_; //相机与imu之间的移动外参
 
   std::string camera_model_;
-  cv::Mat K_;
-  std::string distortion_model_;
-  cv::Mat dist_coeffs_;
+  cv::Mat K_;                    //内参矩阵(3x3)
+  std::string distortion_model_; //畸变模型
+  cv::Mat dist_coeffs_;          //畸变系数
 
   int n_grid_cols_;
   int n_grid_rows_;
@@ -82,7 +82,7 @@ private:
   int state_k_;
   void setup_msckf();
   MSCKF<float> msckf_;
-  Camera<float> camera_;
+  Camera<float> camera_;            //相机对象，记录相机内参和外参(相对于imu坐标系)
   noiseParams<float> noise_params_; //包含imu方差Q_imu, 状态初始协方差P_II_0|0
   MSCKFParams<float> msckf_params_;
   imuState<float> init_imu_state_;
